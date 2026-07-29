@@ -29,6 +29,7 @@ import {
   ServerCliPublishIconTargetMissingError,
 } from "./cliErrors.ts";
 import { resolveServerBundleRuntimeCommand } from "./cliRuntime.ts";
+import { CLI_DISTRIBUTION_NOTICE_ASSETS, copyCliDistributionNotices } from "./cliPackaging.ts";
 
 interface PackageJson {
   name: string;
@@ -174,6 +175,9 @@ const buildCmd = Command.make(
       } else {
         yield* Effect.logWarning("[cli] Web dist not found — skipping client bundle.");
       }
+
+      yield* copyCliDistributionNotices(repoRoot, serverDir);
+      yield* Effect.log("[cli] Bundled third-party notices into dist");
     }),
 ).pipe(Command.withDescription("Build the server package (tsdown + bundle web client)."));
 
@@ -225,7 +229,11 @@ const publishCmd = Command.make(
       const packageJsonPath = path.join(serverDir, "package.json");
 
       // Assert build assets exist
-      for (const relPath of ["dist/bin.mjs", "dist/client/index.html"]) {
+      for (const relPath of [
+        "dist/bin.mjs",
+        "dist/client/index.html",
+        ...CLI_DISTRIBUTION_NOTICE_ASSETS.map((asset) => asset.targetRelativePath),
+      ]) {
         const abs = path.join(serverDir, relPath);
         if (!(yield* fs.exists(abs))) {
           return yield* new ServerCliBuildAssetMissingError({ assetPath: abs });

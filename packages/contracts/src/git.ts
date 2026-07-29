@@ -188,6 +188,11 @@ export const VcsInitInput = Schema.Struct({
 });
 export type VcsInitInput = typeof VcsInitInput.Type;
 
+export const GitTreeSnapshotInput = Schema.Struct({
+  cwd: TrimmedNonEmptyStringSchema,
+});
+export type GitTreeSnapshotInput = typeof GitTreeSnapshotInput.Type;
+
 // RPC Results
 
 const VcsStatusChangeRequest = Schema.Struct({
@@ -319,6 +324,67 @@ export const VcsPullResult = Schema.Struct({
   upstreamRef: TrimmedNonEmptyStringSchema.pipe(Schema.NullOr),
 });
 export type VcsPullResult = typeof VcsPullResult.Type;
+
+export const GitTreeBranchStatus = Schema.Literals(["fresh", "stale", "conflict-risk", "unknown"]);
+export type GitTreeBranchStatus = typeof GitTreeBranchStatus.Type;
+
+export const GitTreeBranch = Schema.Struct({
+  name: TrimmedNonEmptyStringSchema,
+  current: Schema.Boolean,
+  ahead: NonNegativeInt,
+  behind: NonNegativeInt,
+  headSha: TrimmedNonEmptyStringSchema,
+  lastCommitDate: TrimmedNonEmptyStringSchema,
+  lastCommitAuthor: Schema.String,
+  divergedFromSha: Schema.NullOr(TrimmedNonEmptyStringSchema),
+  divergedFromDate: Schema.NullOr(TrimmedNonEmptyStringSchema),
+  status: GitTreeBranchStatus,
+});
+export type GitTreeBranch = typeof GitTreeBranch.Type;
+
+export const GitTreeMerge = Schema.Struct({
+  fullSha: TrimmedNonEmptyStringSchema,
+  sha: TrimmedNonEmptyStringSchema,
+  subject: Schema.String,
+  date: TrimmedNonEmptyStringSchema,
+  prNumber: Schema.NullOr(PositiveInt),
+  prTitle: Schema.NullOr(Schema.String),
+});
+export type GitTreeMerge = typeof GitTreeMerge.Type;
+
+export const GitTreeDirectCommit = Schema.Struct({
+  fullSha: TrimmedNonEmptyStringSchema,
+  sha: TrimmedNonEmptyStringSchema,
+  message: Schema.String,
+  author: Schema.String,
+  date: TrimmedNonEmptyStringSchema,
+});
+export type GitTreeDirectCommit = typeof GitTreeDirectCommit.Type;
+
+const GitTreeSnapshotTruncated = Schema.Struct({
+  branches: Schema.Boolean,
+  merges: Schema.Boolean,
+  directCommits: Schema.Boolean,
+});
+
+export const GitTreeSnapshotResult = Schema.Union([
+  Schema.TaggedStruct("notGitRepository", {
+    requestedCwd: TrimmedNonEmptyStringSchema,
+  }),
+  Schema.TaggedStruct("repository", {
+    requestedCwd: TrimmedNonEmptyStringSchema,
+    root: TrimmedNonEmptyStringSchema,
+    name: TrimmedNonEmptyStringSchema,
+    currentBranch: Schema.NullOr(TrimmedNonEmptyStringSchema),
+    defaultBranch: Schema.NullOr(TrimmedNonEmptyStringSchema),
+    isEmpty: Schema.Boolean,
+    branches: Schema.Array(GitTreeBranch),
+    merges: Schema.Array(GitTreeMerge),
+    directCommits: Schema.Array(GitTreeDirectCommit),
+    truncated: GitTreeSnapshotTruncated,
+  }),
+]);
+export type GitTreeSnapshotResult = typeof GitTreeSnapshotResult.Type;
 
 // RPC / domain errors
 export class GitCommandError extends Schema.TaggedErrorClass<GitCommandError>()("GitCommandError", {

@@ -5119,6 +5119,28 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               }),
           },
           gitVcsDriver: {
+            execute: (input) => {
+              const stdout =
+                input.operation === "GitTreeSnapshot.resolveRoot"
+                  ? "/tmp/repo\n"
+                  : input.operation === "GitTreeSnapshot.currentBranch"
+                    ? "main\n"
+                    : "";
+              const exitCode =
+                input.operation === "GitTreeSnapshot.resolveHead"
+                  ? 128
+                  : input.operation === "GitTreeSnapshot.defaultBranch" ||
+                      input.operation === "GitTreeSnapshot.verifyUnbornHead"
+                    ? 1
+                    : 0;
+              return Effect.succeed({
+                exitCode: ChildProcessSpawner.ExitCode(exitCode),
+                stdout,
+                stderr: "",
+                stdoutTruncated: false,
+                stderrTruncated: false,
+              });
+            },
             pullCurrentBranch: () =>
               Effect.succeed({
                 status: "pulled",
@@ -5247,6 +5269,17 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         ),
       );
       assert.equal(prepared.branch, "feature/demo");
+
+      const tree = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.gitTreeSnapshot]({ cwd: "/tmp/repo" }),
+        ),
+      );
+      assert.equal(tree._tag, "repository");
+      if (tree._tag === "repository") {
+        assert.equal(tree.root, "/tmp/repo");
+        assert.equal(tree.isEmpty, true);
+      }
 
       const refs = yield* Effect.scoped(
         withWsRpcClient(wsUrl, (client) => client[WS_METHODS.vcsListRefs]({ cwd: "/tmp/repo" })),

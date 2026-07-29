@@ -1,7 +1,7 @@
 import { EnvironmentId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { shouldShowOpenInPicker } from "./ChatHeader";
+import { shouldShowGitTreeButton, shouldShowOpenInPicker } from "./ChatHeader";
 
 describe("shouldShowOpenInPicker", () => {
   const primaryEnvironmentId = EnvironmentId.make("environment-primary");
@@ -44,5 +44,18 @@ describe("shouldShowOpenInPicker", () => {
         primaryEnvironmentId,
       }),
     ).toBe(false);
+  });
+});
+
+describe("shouldShowGitTreeButton", () => {
+  it("shows the button when a project cwd can be auto-detected", () => {
+    expect(
+      shouldShowGitTreeButton({ activeProjectName: "t3code", gitCwd: "/workspace/t3code" }),
+    ).toBe(true);
+  });
+
+  it("hides the button without a project or cwd", () => {
+    expect(shouldShowGitTreeButton({ activeProjectName: undefined, gitCwd: null })).toBe(false);
+    expect(shouldShowGitTreeButton({ activeProjectName: "t3code", gitCwd: null })).toBe(false);
   });
 });

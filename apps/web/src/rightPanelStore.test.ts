@@ -142,6 +142,17 @@ describe("rightPanelStore", () => {
     });
   });
 
+  it("keeps the git tree as a singleton surface", () => {
+    useRightPanelStore.getState().open(refA, "git-tree");
+    useRightPanelStore.getState().open(refA, "git-tree");
+
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: true,
+      activeSurfaceId: "git-tree",
+      surfaces: [{ id: "git-tree", kind: "git-tree" }],
+    });
+  });
+
   it("replaces the standalone explorer with peer file surfaces", () => {
     useRightPanelStore.getState().open(refA, "files");
     useRightPanelStore.getState().openFile(refA, "src/index.ts");
@@ -205,8 +216,9 @@ describe("rightPanelStore", () => {
     });
   });
 
-  it("removes persisted file surfaces when their workspace no longer exists", () => {
+  it("removes persisted workspace surfaces when their workspace no longer exists", () => {
     useRightPanelStore.getState().openFile(refA, "src/index.ts");
+    useRightPanelStore.getState().open(refA, "git-tree");
     useRightPanelStore.getState().open(refA, "plan");
     useRightPanelStore.getState().openFile(refA, "README.md");
 
