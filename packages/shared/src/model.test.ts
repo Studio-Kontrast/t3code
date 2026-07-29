@@ -152,6 +152,9 @@ describe("model slug normalization", () => {
     const claude = ProviderDriverKind.make("claudeAgent");
 
     expect(normalizeModelSlug("opus", claude)).toBe("claude-opus-5");
+    expect(normalizeModelSlug("opus-5", claude)).toBe("claude-opus-5");
+    expect(normalizeModelSlug("claude-opus-5.0", claude)).toBe("claude-opus-5");
+    expect(normalizeModelSlug("claude-opus-5-0", claude)).toBe("claude-opus-5");
     expect(normalizeCustomModelSlug(" opus ")).toBe("opus");
   });
 });

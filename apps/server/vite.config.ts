@@ -4,6 +4,7 @@ import { defineConfig, mergeConfig } from "vite-plus";
 import baseConfig from "../../vite.config.ts";
 import { loadRepoEnv } from "../../scripts/lib/public-config.ts";
 import packageJson from "./package.json" with { type: "json" };
+import { createNodeRuntimeCommand } from "../../scripts/lib/runtime-command.ts";
 
 const bundledPackagePrefixes = [
   "@pierre/diffs",
@@ -18,6 +19,7 @@ export function shouldBundleCliDependency(id: string): boolean {
 
 const repoEnv = loadRepoEnv();
 const cliBuildChannel = packageJson.version.includes("-nightly.") ? "nightly" : "latest";
+export const serverBuildCommand = createNodeRuntimeCommand(["scripts/cli.ts", "build"]);
 
 export default mergeConfig(
   baseConfig,
@@ -25,7 +27,7 @@ export default mergeConfig(
     run: {
       tasks: {
         build: {
-          command: "node scripts/cli.ts build",
+          command: serverBuildCommand,
           dependsOn: ["@t3tools/web#build"],
           cache: false,
         },

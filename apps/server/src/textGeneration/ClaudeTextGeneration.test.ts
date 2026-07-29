@@ -78,6 +78,7 @@ function withFakeClaudeEnv<A, E, R>(
     stdinMustContain?: string;
     configDirMustBe?: string;
     claudeConfig?: Partial<ClaudeSettings>;
+    useAbsoluteBinaryPath?: boolean;
   },
   effectFn: (textGeneration: TextGeneration.TextGeneration["Service"]) => Effect.Effect<A, E, R>,
 ) {
@@ -183,13 +184,47 @@ function withFakeClaudeEnv<A, E, R>(
         }),
     );
 
-    const config = decodeClaudeSettings(input.claudeConfig ?? {});
+    const config = decodeClaudeSettings({
+      ...input.claudeConfig,
+      ...(input.useAbsoluteBinaryPath
+        ? { binaryPath: yield* Path.Path.pipe(Effect.map((path) => path.join(binDir, "claude"))) }
+        : {}),
+    });
     const textGeneration = yield* makeClaudeTextGeneration(config);
     return yield* effectFn(textGeneration);
   }).pipe(Effect.scoped);
 }
 
 it.layer(ClaudeTextGenerationTestLayer)("ClaudeTextGeneration", (it) => {
+  it.effect("runs text generation with an absolute Claude executable", () =>
+    withFakeClaudeEnv(
+      {
+        output: JSON.stringify({
+          structured_output: {
+            subject: "Use resolved executable",
+            body: "",
+          },
+        }),
+        useAbsoluteBinaryPath: true,
+      },
+      (textGeneration) =>
+        Effect.gen(function* () {
+          const generated = yield* textGeneration.generateCommitMessage({
+            cwd: process.cwd(),
+            branch: "feature/resolved-claude",
+            stagedSummary: "M README.md",
+            stagedPatch: "diff --git a/README.md b/README.md",
+            modelSelection: createModelSelection(
+              ProviderInstanceId.make("claudeAgent"),
+              "claude-haiku-4-5",
+            ),
+          });
+
+          expect(generated.subject).toBe("Use resolved executable");
+        }),
+    ),
+  );
+
   it.effect("forwards Claude thinking settings for Haiku without passing effort", () =>
     withFakeClaudeEnv(
       {

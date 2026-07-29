@@ -13,6 +13,7 @@
  * @module provider/Drivers/ClaudeDriver
  */
 import { ClaudeSettings, ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
+import { resolveCommandPath } from "@t3tools/shared/shell";
 import * as Cache from "effect/Cache";
 import * as Duration from "effect/Duration";
 import * as Crypto from "effect/Crypto";
@@ -59,6 +60,26 @@ const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
 const CAPABILITIES_PROBE_TTL = Duration.minutes(5);
+
+/**
+ * Resolve the configured Claude executable once before constructing any
+ * runtime consumer. The Agent SDK delegates spawning to Node directly, so a
+ * bare command such as `claude` is less reliable than an absolute path in
+ * desktop child processes even when the health-check shell can find it.
+ *
+ * Keep the configured value when lookup fails so provider status still reports
+ * the existing "not installed or not on PATH" state instead of failing driver
+ * construction.
+ */
+export const resolveClaudeRuntimeSettings = Effect.fn("resolveClaudeRuntimeSettings")(function* (
+  settings: ClaudeSettings,
+  environment: NodeJS.ProcessEnv,
+) {
+  const binaryPath = yield* resolveCommandPath(settings.binaryPath, {
+    env: environment,
+  }).pipe(Effect.catchTag("CommandResolutionError", () => Effect.succeed(settings.binaryPath)));
+  return binaryPath === settings.binaryPath ? settings : { ...settings, binaryPath };
+});
 
 function isClaudeNativeCommandPath(commandPath: string): boolean {
   const normalized = normalizeCommandPath(commandPath);
@@ -130,7 +151,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         driverKind: DRIVER_KIND,
         instanceId,
       });
-      const effectiveConfig = { ...config, enabled } satisfies ClaudeSettings;
+      const configuredSettings = { ...config, enabled } satisfies ClaudeSettings;
+      const effectiveConfig = yield* resolveClaudeRuntimeSettings(configuredSettings, processEnv);
       const maintenanceCapabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
         binaryPath: effectiveConfig.binaryPath,
         env: processEnv,
@@ -175,7 +197,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         Effect.provideService(Path.Path, path),
       );
 
-      const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
+      const snapshotSettings = makeProviderSnapshotSettingsSource(
+        configuredSettings,
+        serverSettings,
+      );
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<ClaudeSettings>>({
         maintenanceCapabilities,
         getSettings: snapshotSettings.getSettings,

@@ -395,6 +395,27 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("passes an absolute Claude executable to SDK sessions", () => {
+    const binaryPath = "/opt/t3code/bin/claude";
+    const harness = makeHarness({ claudeConfig: { binaryPath } });
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "approval-required",
+      });
+
+      assert.equal(
+        harness.getLastCreateQueryInput()?.options.pathToClaudeCodeExecutable,
+        binaryPath,
+      );
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("uses bypass permissions for full-access claude sessions", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

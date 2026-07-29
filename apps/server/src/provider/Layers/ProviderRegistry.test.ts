@@ -192,6 +192,7 @@ function recordingMockSpawnerLayer(
   },
 ) {
   const commands: Array<{
+    readonly command: string;
     readonly args: ReadonlyArray<string>;
     readonly env: NodeJS.ProcessEnv | undefined;
   }> = [];
@@ -199,12 +200,13 @@ function recordingMockSpawnerLayer(
     ChildProcessSpawner.ChildProcessSpawner,
     ChildProcessSpawner.make((command) => {
       const cmd = command as unknown as {
+        command: string;
         args: ReadonlyArray<string>;
         options?: {
           readonly env?: NodeJS.ProcessEnv;
         };
       };
-      commands.push({ args: cmd.args, env: cmd.options?.env });
+      commands.push({ command: cmd.command, args: cmd.args, env: cmd.options?.env });
       return Effect.succeed(mockHandle(handler(cmd.args)));
     }),
   );
@@ -1836,6 +1838,33 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
     // ── checkClaudeProviderStatus tests ──────────────────────────
 
     describe("checkClaudeProviderStatus", () => {
+      it.effect("uses an absolute Claude executable for health checks", () =>
+        Effect.gen(function* () {
+          const binaryPath = "/opt/t3code/bin/claude";
+          const recorded = recordingMockSpawnerLayer((args) => {
+            const joined = args.join(" ");
+            if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
+            if (joined === "auth status")
+              return {
+                stdout: '{"loggedIn":true,"authMethod":"claude.ai"}\n',
+                stderr: "",
+                code: 0,
+              };
+            throw new Error(`Unexpected args: ${joined}`);
+          });
+          const settings = { ...defaultClaudeSettings, binaryPath };
+
+          yield* checkClaudeProviderStatus(settings, claudeCapabilities()).pipe(
+            Effect.provide(recorded.layer),
+          );
+
+          assert.deepEqual(
+            recorded.commands.map((command) => command.command),
+            [binaryPath],
+          );
+        }),
+      );
+
       it.effect("returns ready when claude is installed and authenticated", () =>
         Effect.gen(function* () {
           const status = yield* checkClaudeProviderStatus(
@@ -1885,7 +1914,6 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           ),
         ),
       );
-
       it.effect("includes Claude Opus 5 on supported Claude Code versions", () =>
         Effect.gen(function* () {
           const status = yield* checkClaudeProviderStatus(

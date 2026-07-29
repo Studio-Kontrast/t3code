@@ -28,6 +28,7 @@ import {
   ServerCliPublishIconSourceMissingError,
   ServerCliPublishIconTargetMissingError,
 } from "./cliErrors.ts";
+import { resolveServerBundleRuntimeCommand } from "./cliRuntime.ts";
 
 interface PackageJson {
   name: string;
@@ -153,8 +154,9 @@ const buildCmd = Command.make(
       const serverDir = path.join(repoRoot, "apps/server");
 
       yield* Effect.log("[cli] Running tsdown...");
+      const bundleCommand = resolveServerBundleRuntimeCommand();
       yield* runCommand(
-        ChildProcess.make(process.execPath, ["--run", "build:bundle"], {
+        ChildProcess.make(bundleCommand.command, bundleCommand.args, {
           cwd: serverDir,
           stdout: config.verbose ? "inherit" : "ignore",
           stderr: "inherit",

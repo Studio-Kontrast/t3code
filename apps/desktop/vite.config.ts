@@ -1,9 +1,14 @@
 import { defineConfig } from "vite-plus";
 
 import { loadRepoEnv } from "../../scripts/lib/public-config.ts";
+import { createNodeRuntimeCommand } from "../../scripts/lib/runtime-command.ts";
 
 const repoEnv = loadRepoEnv();
 const shouldLaunchElectronAfterPack = process.env.T3CODE_DESKTOP_DEV === "1";
+const buildPreviewAnnotationCssCommand = createNodeRuntimeCommand([
+  "scripts/build-preview-annotation-css.mjs",
+]);
+const devElectronCommand = createNodeRuntimeCommand(["scripts/dev-electron.mjs"]);
 const publicConfigDefine = {
   __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__: JSON.stringify(
     repoEnv.T3CODE_CLERK_PUBLISHABLE_KEY?.trim() ?? "",
@@ -14,22 +19,21 @@ export default defineConfig({
   run: {
     tasks: {
       build: {
-        command: "node scripts/build-preview-annotation-css.mjs && vp pack",
+        command: `${buildPreviewAnnotationCssCommand} && vp pack`,
         dependsOn: ["t3#build"],
         cache: false,
       },
       dev: {
-        command:
-          "node scripts/build-preview-annotation-css.mjs && cross-env T3CODE_DESKTOP_DEV=1 vp pack --watch",
+        command: `${buildPreviewAnnotationCssCommand} && cross-env T3CODE_DESKTOP_DEV=1 vp pack --watch`,
         dependsOn: ["t3#build"],
         cache: false,
       },
       "dev:bundle": {
-        command: "node scripts/build-preview-annotation-css.mjs && vp pack --watch",
+        command: `${buildPreviewAnnotationCssCommand} && vp pack --watch`,
         cache: false,
       },
       "dev:electron": {
-        command: "node scripts/dev-electron.mjs",
+        command: devElectronCommand,
         dependsOn: ["t3#build"],
         cache: false,
       },
@@ -47,7 +51,7 @@ export default defineConfig({
       deps: {
         alwaysBundle: (id) => id.startsWith("@t3tools/"),
       },
-      ...(shouldLaunchElectronAfterPack ? { onSuccess: "node scripts/dev-electron.mjs" } : {}),
+      ...(shouldLaunchElectronAfterPack ? { onSuccess: devElectronCommand } : {}),
     },
     {
       format: "cjs",
