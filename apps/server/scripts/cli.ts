@@ -152,10 +152,11 @@ const buildCmd = Command.make(
       const fs = yield* FileSystem.FileSystem;
       const repoRoot = yield* RepoRoot;
       const serverDir = path.join(repoRoot, "apps/server");
+      const vitePlusCli = path.join(repoRoot, "node_modules/vite-plus/bin/vp");
 
       yield* Effect.log("[cli] Running tsdown...");
       yield* runCommand(
-        ChildProcess.make(process.execPath, ["--run", "build:bundle"], {
+        ChildProcess.make(process.execPath, [vitePlusCli, "pack"], {
           cwd: serverDir,
           stdout: config.verbose ? "inherit" : "ignore",
           stderr: "inherit",

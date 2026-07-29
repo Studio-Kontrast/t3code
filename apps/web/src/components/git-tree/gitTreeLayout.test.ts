@@ -6,6 +6,7 @@ import {
   clampGitTreeZoom,
   GIT_TREE_ZOOM_MAX,
   GIT_TREE_ZOOM_MIN,
+  gitTreeCommitHitWidth,
 } from "./gitTreeLayout";
 
 const merge = (sha: string, date: string): GitTreeMerge => ({
@@ -42,6 +43,12 @@ describe("gitTreeLayout", () => {
   it("clamps zoom to the supported range", () => {
     expect(clampGitTreeZoom(0.01)).toBe(GIT_TREE_ZOOM_MIN);
     expect(clampGitTreeZoom(10)).toBe(GIT_TREE_ZOOM_MAX);
+  });
+
+  it("expands commit hit areas without letting adjacent areas overlap", () => {
+    expect(gitTreeCommitHitWidth(40, undefined, undefined)).toBe(20);
+    expect(gitTreeCommitHitWidth(40, 16, 64)).toBe(20);
+    expect(gitTreeCommitHitWidth(40, 24, 56)).toBe(14);
   });
 
   it("orders main-line commits chronologically and excludes the default branch arc", () => {
@@ -120,6 +127,7 @@ describe("gitTreeLayout", () => {
     } as const;
 
     const layout = buildGitTreeLayout(input);
+    const zoomedLayout = buildGitTreeLayout({ ...input, zoom: 2 });
     const reversed = buildGitTreeLayout({
       ...input,
       merges: input.merges.toReversed(),
@@ -134,7 +142,13 @@ describe("gitTreeLayout", () => {
     expect(new Set(positions).size).toBe(positions.length);
     const sortedPositions = positions.toSorted((left, right) => left - right);
     expect(
-      sortedPositions.slice(1).every((position, index) => position - sortedPositions[index]! >= 18),
+      sortedPositions.slice(1).every((position, index) => position - sortedPositions[index]! >= 24),
+    ).toBe(true);
+    const zoomedPositions = [...zoomedLayout.merges, ...zoomedLayout.directCommits]
+      .map(({ x }) => x)
+      .toSorted((left, right) => left - right);
+    expect(
+      zoomedPositions.slice(1).every((position, index) => position - zoomedPositions[index]! >= 48),
     ).toBe(true);
     expect(Math.min(...positions)).toBe(layout.mainStartX);
     expect(Math.max(...positions)).toBe(layout.mainEndX);

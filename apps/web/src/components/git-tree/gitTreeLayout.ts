@@ -12,8 +12,10 @@ const LANE_HEIGHT = 58;
 const MAX_LANES = 5;
 const CORNER_RADIUS = 18;
 const DAY_MS = 86_400_000;
-const MIN_COMMIT_SPACING = 18;
+const MIN_COMMIT_SPACING = 24;
 const MAX_BRANCH_COMMIT_TICKS = 12;
+const MAX_COMMIT_HIT_WIDTH = 20;
+const COMMIT_HIT_GAP = 2;
 
 export const GIT_TREE_ZOOM_MIN = 0.4;
 export const GIT_TREE_ZOOM_MAX = 2.4;
@@ -67,6 +69,16 @@ export function clampGitTreeZoom(value: number): number {
   return clamp(Math.round(value * 100) / 100, GIT_TREE_ZOOM_MIN, GIT_TREE_ZOOM_MAX);
 }
 
+export function gitTreeCommitHitWidth(
+  x: number,
+  previousX: number | undefined,
+  nextX: number | undefined,
+): number {
+  const leftGap = previousX === undefined ? Number.POSITIVE_INFINITY : x - previousX;
+  const rightGap = nextX === undefined ? Number.POSITIVE_INFINITY : nextX - x;
+  return Math.min(MAX_COMMIT_HIT_WIDTH, Math.max(0, Math.min(leftGap, rightGap) - COMMIT_HIT_GAP));
+}
+
 /**
  * Builds stable SVG geometry independently of React so large repositories can
  * be covered with deterministic unit tests.
@@ -74,6 +86,7 @@ export function clampGitTreeZoom(value: number): number {
 export function buildGitTreeLayout(input: GitTreeLayoutInput): GitTreeLayout {
   const zoom = clampGitTreeZoom(input.zoom);
   const nodeSpacing = Math.max(MIN_NODE_SPACING, Math.round(BASE_NODE_SPACING * zoom));
+  const commitSpacing = Math.max(16, Math.round(MIN_COMMIT_SPACING * zoom));
   const merges = [...input.merges].sort(
     (left, right) =>
       timestamp(left.date) - timestamp(right.date) || left.fullSha.localeCompare(right.fullSha),
@@ -128,7 +141,7 @@ export function buildGitTreeLayout(input: GitTreeLayoutInput): GitTreeLayout {
   for (const event of timelineEvents) {
     const baseX = rawTimeToX(event.commit.date);
     const x = Number.isFinite(previousEventX)
-      ? Math.max(baseX, previousEventX + MIN_COMMIT_SPACING)
+      ? Math.max(baseX, previousEventX + commitSpacing)
       : baseX;
     unshiftedEventX.set(eventKey(event.kind, event.commit.fullSha), x);
     previousEventX = x;
@@ -193,7 +206,7 @@ export function buildGitTreeLayout(input: GitTreeLayoutInput): GitTreeLayout {
     : mainStartX;
 
   const laneCount = Math.max(1, Math.min(MAX_LANES, visibleBranches.length));
-  const minimumMainY = 72 + laneCount * LANE_HEIGHT;
+  const minimumMainY = 92 + laneCount * LANE_HEIGHT;
   const mainY = Math.max(minimumMainY, input.viewportHeight - 104);
 
   const branchesByFork = [...visibleBranches].sort((left, right) => {
@@ -219,7 +232,7 @@ export function buildGitTreeLayout(input: GitTreeLayoutInput): GitTreeLayout {
     ].join(" ");
     const commitSpanStart = forkX + CORNER_RADIUS;
     const commitSpan = Math.max(0, tipX - commitSpanStart);
-    const commitsThatFit = Math.max(0, Math.floor(commitSpan / MIN_COMMIT_SPACING) - 1);
+    const commitsThatFit = Math.max(0, Math.floor(commitSpan / commitSpacing) - 1);
     const visibleCommitCount = Math.min(branch.ahead, MAX_BRANCH_COMMIT_TICKS, commitsThatFit);
     const commitXs = Array.from(
       { length: visibleCommitCount },

@@ -24,6 +24,12 @@ export function shouldRefreshGitTreeForVcsChange(
   return previous !== null && next !== null && !Object.is(previous, next);
 }
 
+export function hasGitTreeActivity(
+  snapshot: Extract<GitTreeSnapshotResult, { _tag: "repository" }>,
+): boolean {
+  return snapshot.merges.length > 0 || snapshot.directCommits.length > 0;
+}
+
 function GitTreeEmptyState(props: {
   readonly icon: typeof GitFork;
   readonly title: string;
@@ -170,11 +176,11 @@ export default function GitTreePanel({ environmentId, cwd, vcsRefreshToken }: Gi
           title="This project is not a Git repository"
           description="Open a project backed by Git to visualize its local branch history."
         />
-      ) : snapshot.isEmpty ? (
+      ) : snapshot.isEmpty || !hasGitTreeActivity(snapshot) ? (
         <GitTreeEmptyState
           icon={GitFork}
-          title="No commits yet"
-          description="The repository was detected, but its history is empty. Create the first commit to build the tree."
+          title="No Git activity yet"
+          description="Commits and branches will appear here once this repository has history."
           action={{ label: "Refresh", onClick: query.refresh }}
         />
       ) : (

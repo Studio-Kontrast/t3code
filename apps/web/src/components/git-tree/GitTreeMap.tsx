@@ -6,7 +6,6 @@ import type { GitTreeBranch, GitTreeSnapshotResult } from "@t3tools/contracts";
 import { Minus, Plus } from "lucide-react";
 import {
   type CSSProperties,
-  type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   useCallback,
   useEffect,
@@ -24,6 +23,7 @@ import {
   clampGitTreeZoom,
   GIT_TREE_ZOOM_MAX,
   GIT_TREE_ZOOM_MIN,
+  gitTreeCommitHitWidth,
 } from "./gitTreeLayout";
 
 type RepositorySnapshot = Extract<GitTreeSnapshotResult, { _tag: "repository" }>;
@@ -43,9 +43,27 @@ interface DragState {
   readonly scrollLeft: number;
 }
 
+type GitTreeTarget =
+  | { readonly kind: "branch"; readonly name: string }
+  | { readonly kind: "direct"; readonly sha: string }
+  | { readonly kind: "merge"; readonly sha: string };
+
+interface GitTreeTooltipContent {
+  readonly x: number;
+  readonly y: number;
+  readonly markerColor?: string;
+  readonly title: string;
+  readonly meta: string;
+  readonly detail: string;
+}
+
 const MAIN_DRAW_MS = 1_200;
 const BRANCH_STAGGER_MS = 60;
 const BRANCH_INFO_OFFSET_MS = 750;
+const TOOLTIP_WIDTH = 248;
+const TOOLTIP_HEIGHT = 68;
+const TOOLTIP_GAP = 18;
+const TOOLTIP_WARM_WINDOW_MS = 400;
 
 function formatDate(value: string): string {
   const date = new Date(value);
@@ -88,6 +106,56 @@ function branchDescription(branch: GitTreeBranch): string {
   return `${branch.name}, ${position || "at the default branch"}, last commit by ${branch.lastCommitAuthor} on ${formatDate(branch.lastCommitDate)}`;
 }
 
+function GitTreeTooltip({
+  content,
+  layoutWidth,
+  instant,
+}: {
+  readonly content: GitTreeTooltipContent;
+  readonly layoutWidth: number;
+  readonly instant: boolean;
+}) {
+  const left = Math.min(
+    Math.max(content.x - TOOLTIP_WIDTH / 2, 8),
+    layoutWidth - TOOLTIP_WIDTH - 8,
+  );
+  const top = Math.max(8, content.y - TOOLTIP_HEIGHT - TOOLTIP_GAP);
+
+  return (
+    <div
+      className="git-tree-tooltip-positioner pointer-events-none absolute top-0 left-0 z-10"
+      style={{
+        width: TOOLTIP_WIDTH,
+        height: TOOLTIP_HEIGHT,
+        transform: `translate3d(${left}px, ${top}px, 0)`,
+      }}
+      aria-hidden
+    >
+      <div
+        data-instant={instant || undefined}
+        className="git-tree-tooltip-card h-full rounded-lg border border-border/70 bg-popover/95 px-3 py-2 text-xs shadow-md backdrop-blur-sm"
+        style={
+          {
+            "--git-tree-tooltip-arrow-x": `${content.x - left}px`,
+          } as CSSProperties
+        }
+      >
+        <div className="flex min-w-0 items-center gap-1.5 font-medium text-foreground">
+          {content.markerColor ? (
+            <span
+              className="size-2 shrink-0 rounded-full"
+              style={{ backgroundColor: content.markerColor }}
+            />
+          ) : null}
+          <span className="truncate">{content.title}</span>
+        </div>
+        <div className="mt-0.5 truncate text-muted-foreground">{content.meta}</div>
+        <div className="mt-0.5 truncate text-muted-foreground">{content.detail}</div>
+      </div>
+    </div>
+  );
+}
+
 export function GitTreeMap({ snapshot }: GitTreeMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -95,11 +163,14 @@ export function GitTreeMap({ snapshot }: GitTreeMapProps) {
   const zoomAnchorRef = useRef<ZoomAnchor | null>(null);
   const zoomFrameRef = useRef<number | null>(null);
   const pendingZoomRef = useRef<number | null>(null);
+  const tooltipWarmRef = useRef(false);
+  const tooltipWarmTimeoutRef = useRef<number | null>(null);
   const [viewportHeight, setViewportHeight] = useState(420);
   const [zoom, setZoom] = useState(1);
-  const [focusedBranchName, setFocusedBranchName] = useState<string | null>(null);
-  const [selectedBranchName, setSelectedBranchName] = useState<string | null>(null);
-  const [selectedCommitSha, setSelectedCommitSha] = useState<string | null>(null);
+  const [hoveredTarget, setHoveredTarget] = useState<GitTreeTarget | null>(null);
+  const [focusedTarget, setFocusedTarget] = useState<GitTreeTarget | null>(null);
+  const [displayedTarget, setDisplayedTarget] = useState<GitTreeTarget | null>(null);
+  const [tooltipInstant, setTooltipInstant] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
   const [drawReady, setDrawReady] = useState(false);
 
@@ -115,15 +186,22 @@ export function GitTreeMap({ snapshot }: GitTreeMapProps) {
       }),
     [snapshot, viewportHeight, zoom],
   );
+  const commitHitWidths = useMemo(() => {
+    const marks = [
+      ...layout.directCommits.map(({ commit, x }) => ({
+        key: `direct:${commit.fullSha}`,
+        x,
+      })),
+      ...layout.merges.map(({ commit, x }) => ({ key: `merge:${commit.fullSha}`, x })),
+    ].sort((left, right) => left.x - right.x || left.key.localeCompare(right.key));
 
-  const selectedBranch = useMemo(
-    () => snapshot.branches.find((branch) => branch.name === selectedBranchName) ?? null,
-    [selectedBranchName, snapshot.branches],
-  );
-  const selectedCommit = useMemo(
-    () => snapshot.directCommits.find((commit) => commit.fullSha === selectedCommitSha) ?? null,
-    [selectedCommitSha, snapshot.directCommits],
-  );
+    return new Map(
+      marks.map((mark, index) => [
+        mark.key,
+        gitTreeCommitHitWidth(mark.x, marks[index - 1]?.x, marks[index + 1]?.x),
+      ]),
+    );
+  }, [layout.directCommits, layout.merges]);
 
   useEffect(() => {
     setDrawReady(false);
@@ -175,6 +253,9 @@ export function GitTreeMap({ snapshot }: GitTreeMapProps) {
   useEffect(
     () => () => {
       if (zoomFrameRef.current !== null) cancelAnimationFrame(zoomFrameRef.current);
+      if (tooltipWarmTimeoutRef.current !== null) {
+        window.clearTimeout(tooltipWarmTimeoutRef.current);
+      }
     },
     [],
   );
@@ -239,36 +320,93 @@ export function GitTreeMap({ snapshot }: GitTreeMapProps) {
     setIsPanning(false);
   }, []);
 
-  const activateBranch = useCallback((branch: GitTreeBranch) => {
-    setSelectedCommitSha(null);
-    setSelectedBranchName((current) => (current === branch.name ? null : branch.name));
+  const cancelTooltipHide = useCallback(() => {
+    if (tooltipWarmTimeoutRef.current === null) return;
+    window.clearTimeout(tooltipWarmTimeoutRef.current);
+    tooltipWarmTimeoutRef.current = null;
   }, []);
 
-  const activateCommit = useCallback((fullSha: string) => {
-    setSelectedBranchName(null);
-    setSelectedCommitSha((current) => (current === fullSha ? null : fullSha));
-  }, []);
+  const scheduleTooltipHide = useCallback(() => {
+    cancelTooltipHide();
+    tooltipWarmTimeoutRef.current = window.setTimeout(() => {
+      tooltipWarmRef.current = false;
+      tooltipWarmTimeoutRef.current = null;
+      setDisplayedTarget(null);
+    }, TOOLTIP_WARM_WINDOW_MS);
+  }, [cancelTooltipHide]);
 
-  const handleBranchKeyDown = useCallback(
-    (event: KeyboardEvent<SVGGElement>, branch: GitTreeBranch) => {
-      if (event.key !== "Enter" && event.key !== " ") return;
-      event.preventDefault();
-      activateBranch(branch);
+  const showHoveredTooltip = useCallback(
+    (target: GitTreeTarget) => {
+      cancelTooltipHide();
+      setTooltipInstant(tooltipWarmRef.current);
+      tooltipWarmRef.current = true;
+      setHoveredTarget(target);
+      setDisplayedTarget(target);
     },
-    [activateBranch],
+    [cancelTooltipHide],
   );
 
-  const handleCommitKeyDown = useCallback(
-    (event: KeyboardEvent<SVGGElement>, fullSha: string) => {
-      if (event.key !== "Enter" && event.key !== " ") return;
-      event.preventDefault();
-      activateCommit(fullSha);
+  const hideHoveredTooltip = useCallback(() => {
+    setHoveredTarget(null);
+    if (focusedTarget === null) scheduleTooltipHide();
+  }, [focusedTarget, scheduleTooltipHide]);
+
+  const showFocusedTooltip = useCallback(
+    (target: GitTreeTarget) => {
+      cancelTooltipHide();
+      tooltipWarmRef.current = true;
+      setTooltipInstant(true);
+      setFocusedTarget(target);
+      setDisplayedTarget(target);
     },
-    [activateCommit],
+    [cancelTooltipHide],
   );
 
-  const hasFocus = focusedBranchName !== null || selectedBranchName !== null;
-  const activeBranchName = selectedBranchName ?? focusedBranchName;
+  const hideFocusedTooltip = useCallback(() => {
+    setFocusedTarget(null);
+    if (hoveredTarget === null) scheduleTooltipHide();
+  }, [hoveredTarget, scheduleTooltipHide]);
+
+  const activeTarget = hoveredTarget ?? focusedTarget;
+  const activeBranchName = activeTarget?.kind === "branch" ? activeTarget.name : null;
+  const hasFocus = activeBranchName !== null;
+  const tooltipContent = useMemo((): GitTreeTooltipContent | null => {
+    if (!displayedTarget) return null;
+    if (displayedTarget.kind === "branch") {
+      const item = layout.branches.find(({ branch }) => branch.name === displayedTarget.name);
+      if (!item) return null;
+      return {
+        x: item.tipX,
+        y: item.laneY,
+        markerColor: branchColor(item.branch),
+        title: item.branch.name,
+        meta: `${item.branch.ahead} ahead · ${item.branch.behind} behind · ${item.branch.lastCommitAuthor}`,
+        detail: `${formatDate(item.branch.lastCommitDate)} · ${item.branch.headSha.slice(0, 8)}`,
+      };
+    }
+    if (displayedTarget.kind === "direct") {
+      const item = layout.directCommits.find(
+        ({ commit }) => commit.fullSha === displayedTarget.sha,
+      );
+      if (!item) return null;
+      return {
+        x: item.x,
+        y: layout.mainY,
+        title: item.commit.message,
+        meta: `${item.commit.sha} · ${item.commit.author}`,
+        detail: formatDate(item.commit.date),
+      };
+    }
+    const item = layout.merges.find(({ commit }) => commit.fullSha === displayedTarget.sha);
+    if (!item) return null;
+    return {
+      x: item.x,
+      y: layout.mainY,
+      title: item.commit.prTitle ?? item.commit.subject,
+      meta: `${item.commit.prNumber ? `#${item.commit.prNumber}` : item.commit.sha} · merge commit`,
+      detail: formatDate(item.commit.date),
+    };
+  }, [displayedTarget, layout]);
   const defaultBranchLabel = snapshot.defaultBranch ?? snapshot.currentBranch ?? "HEAD";
 
   return (
@@ -276,7 +414,7 @@ export function GitTreeMap({ snapshot }: GitTreeMapProps) {
       <div
         ref={scrollRef}
         className={cn(
-          "size-full touch-pan-y select-none overflow-auto overscroll-contain",
+          "size-full touch-pan-y select-none overflow-x-auto overflow-y-hidden overscroll-contain",
           isPanning ? "cursor-grabbing" : "cursor-grab",
         )}
         role="region"
@@ -286,266 +424,282 @@ export function GitTreeMap({ snapshot }: GitTreeMapProps) {
         onPointerUp={finishPanning}
         onPointerCancel={finishPanning}
       >
-        <svg
-          width={layout.width}
-          height={layout.height}
-          viewBox={`0 0 ${layout.width} ${layout.height}`}
-          className={cn("block max-w-none", drawReady && "git-tree-timeline-ready")}
-          role="group"
-          aria-labelledby="git-tree-map-title git-tree-map-description"
-        >
-          <title id="git-tree-map-title">Git history for {snapshot.name}</title>
-          <desc id="git-tree-map-description">
-            {snapshot.branches.length} branches, {snapshot.merges.length} merge commits, and{" "}
-            {snapshot.directCommits.length} direct commits.
-          </desc>
-          <defs>
-            <filter id="git-tree-node-shadow" x="-100%" y="-100%" width="300%" height="300%">
-              <feDropShadow dx="0" dy="1" stdDeviation="2" floodOpacity="0.16" />
-            </filter>
-          </defs>
-
-          <g
-            className="transition-opacity duration-150 ease-in-out motion-reduce:transition-none"
-            opacity={hasFocus ? 0.35 : 1}
+        <div className="relative shrink-0" style={{ width: layout.width, height: layout.height }}>
+          <svg
+            width={layout.width}
+            height={layout.height}
+            viewBox={`0 0 ${layout.width} ${layout.height}`}
+            className={cn("block max-w-none", drawReady && "git-tree-timeline-ready")}
+            role="group"
+            aria-labelledby="git-tree-map-title git-tree-map-description"
           >
-            <path
-              d={`M ${layout.mainStartX} ${layout.mainY} L ${layout.mainEndX} ${layout.mainY}`}
-              fill="none"
-              stroke="var(--muted-foreground)"
-              strokeWidth={1.5}
-              pathLength={1}
-              className="git-tree-draw-main"
-            />
+            <title id="git-tree-map-title">{`Git history for ${snapshot.name}`}</title>
+            <desc id="git-tree-map-description">
+              {snapshot.branches.length} branches, {snapshot.merges.length} merge commits, and{" "}
+              {snapshot.directCommits.length} direct commits.
+            </desc>
+            <defs>
+              <filter id="git-tree-node-shadow" x="-100%" y="-100%" width="300%" height="300%">
+                <feDropShadow dx="0" dy="1" stdDeviation="2" floodOpacity="0.16" />
+              </filter>
+            </defs>
+
             <g
-              className="git-tree-fade-info"
-              style={{ "--git-tree-delay": `${MAIN_DRAW_MS}ms` } as CSSProperties}
+              className="transition-opacity duration-150 ease-in-out motion-reduce:transition-none"
+              opacity={hasFocus ? 0.35 : 1}
             >
               <path
-                d={`M ${layout.mainEndX} ${layout.mainY} L ${layout.width - 84} ${layout.mainY}`}
+                d={`M ${layout.mainStartX} ${layout.mainY} L ${layout.mainEndX} ${layout.mainY}`}
                 fill="none"
                 stroke="var(--muted-foreground)"
-                strokeDasharray="6 6"
                 strokeWidth={1.5}
+                pathLength={1}
+                className="git-tree-draw-main"
               />
-              <text
-                x={layout.width - 76}
-                y={layout.mainY + 4}
-                fill="var(--foreground)"
-                fontSize={12}
-                fontWeight={600}
+              <g
+                className="git-tree-fade-info"
+                style={{ "--git-tree-delay": `${MAIN_DRAW_MS}ms` } as CSSProperties}
               >
-                {defaultBranchLabel}
-              </text>
-
-              {layout.directCommits.map(({ commit, x }) => {
-                const active = selectedCommitSha === commit.fullSha;
-                return (
-                  <g
-                    key={commit.fullSha}
-                    data-git-tree-interactive
-                    role="button"
-                    tabIndex={0}
-                    aria-label={`${commit.sha}, ${commit.message}, by ${commit.author} on ${formatDate(commit.date)}`}
-                    aria-pressed={active}
-                    className="cursor-pointer outline-none focus-visible:[&_rect]:stroke-[var(--ring)]"
-                    onClick={() => activateCommit(commit.fullSha)}
-                    onKeyDown={(event) => handleCommitKeyDown(event, commit.fullSha)}
-                  >
-                    <title>
-                      {commit.sha} · {commit.message} · {commit.author} · {formatDate(commit.date)}
-                    </title>
-                    <rect
-                      x={x - (active ? 4 : 3)}
-                      y={layout.mainY - (active ? 4 : 3)}
-                      width={active ? 8 : 6}
-                      height={active ? 8 : 6}
-                      rx={1.5}
-                      fill={active ? "var(--primary)" : "var(--muted-foreground)"}
-                      stroke="transparent"
-                      strokeWidth={2}
-                    />
-                  </g>
-                );
-              })}
-
-              {layout.merges.map(({ commit, x }, index) => {
-                const showLabel = index % layout.labelEvery === 0;
-                const label = commit.prNumber ? `#${commit.prNumber}` : commit.sha;
-                return (
-                  <g key={commit.fullSha}>
-                    <title>
-                      {label} · {commit.prTitle ?? commit.subject} · {formatDate(commit.date)}
-                    </title>
-                    <rect
-                      x={x - 4}
-                      y={layout.mainY - 4}
-                      width={8}
-                      height={8}
-                      rx={2}
-                      fill="var(--background)"
-                      stroke="var(--muted-foreground)"
-                      strokeWidth={1.5}
-                      filter="url(#git-tree-node-shadow)"
-                    />
-                    {showLabel ? (
-                      <>
-                        <text
-                          x={x}
-                          y={layout.mainY + 20}
-                          textAnchor="middle"
-                          fill="var(--foreground)"
-                          fontSize={11}
-                          fontWeight={500}
-                        >
-                          {label}
-                        </text>
-                        <text
-                          x={x}
-                          y={layout.mainY + 34}
-                          textAnchor="middle"
-                          fill="var(--muted-foreground)"
-                          fontSize={10}
-                        >
-                          {compactDate(commit.date)}
-                        </text>
-                      </>
-                    ) : null}
-                  </g>
-                );
-              })}
-            </g>
-          </g>
-
-          {layout.branches.map(
-            ({ branch, forkX, tipX, laneY, path, commitXs, hiddenCommitCount }, index) => {
-              const active = activeBranchName === branch.name;
-              const dimmed = hasFocus && !active;
-              const color = branchColor(branch);
-              const branchDelay = MAIN_DRAW_MS + index * BRANCH_STAGGER_MS;
-              return (
-                <g
-                  key={branch.name}
-                  data-git-tree-interactive
-                  role="button"
-                  tabIndex={0}
-                  aria-label={branchDescription(branch)}
-                  aria-pressed={selectedBranchName === branch.name}
-                  className="cursor-pointer outline-none transition-opacity duration-150 ease-in-out focus-visible:[&_path[data-visible]]:stroke-[var(--ring)] motion-reduce:transition-none"
-                  opacity={dimmed ? 0.16 : active ? 1 : 0.72}
-                  onFocus={() => setFocusedBranchName(branch.name)}
-                  onBlur={() => setFocusedBranchName(null)}
-                  onMouseEnter={() => setFocusedBranchName(branch.name)}
-                  onMouseLeave={() => setFocusedBranchName(null)}
-                  onClick={() => activateBranch(branch)}
-                  onKeyDown={(event) => handleBranchKeyDown(event, branch)}
+                <path
+                  d={`M ${layout.mainEndX} ${layout.mainY} L ${layout.width - 84} ${layout.mainY}`}
+                  fill="none"
+                  stroke="var(--muted-foreground)"
+                  strokeDasharray="6 6"
+                  strokeWidth={1.5}
+                />
+                <text
+                  x={layout.width - 76}
+                  y={layout.mainY + 4}
+                  fill="var(--foreground)"
+                  fontSize={12}
+                  fontWeight={600}
                 >
-                  <title>{branchDescription(branch)}</title>
-                  <path d={path} fill="none" stroke="transparent" strokeWidth={18} />
-                  <path
-                    data-visible
-                    d={path}
-                    fill="none"
-                    stroke={color}
-                    strokeWidth={active ? 2.5 : 1.75}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    pathLength={1}
-                    className="git-tree-draw-branch"
-                    style={{ "--git-tree-delay": `${branchDelay}ms` } as CSSProperties}
-                  />
-                  <g
-                    className="git-tree-fade-info"
-                    style={
-                      {
-                        "--git-tree-delay": `${branchDelay + BRANCH_INFO_OFFSET_MS}ms`,
-                      } as CSSProperties
-                    }
-                  >
-                    <rect
-                      x={forkX - 3.5}
-                      y={layout.mainY - 3.5}
-                      width={7}
-                      height={7}
-                      rx={2}
-                      fill="var(--background)"
-                      stroke={color}
-                      strokeWidth={1.5}
-                    />
-                    {commitXs.map((x) => (
-                      <rect
-                        key={`${branch.name}-commit-${x}`}
-                        x={x - 2.5}
-                        y={laneY - 2.5}
-                        width={5}
-                        height={5}
-                        rx={1}
-                        fill={color}
-                      />
-                    ))}
-                    {hiddenCommitCount > 0 ? (
-                      <text
-                        x={tipX - 7}
-                        y={laneY - 8}
-                        textAnchor="end"
-                        fill="var(--muted-foreground)"
-                        fontSize={9}
-                      >
-                        +{hiddenCommitCount}
-                      </text>
-                    ) : null}
-                    <circle cx={tipX} cy={laneY} r={active ? 5 : 4} fill={color} />
-                    <text
-                      x={tipX + 10}
-                      y={laneY - 3}
-                      fill="var(--foreground)"
-                      fontSize={11}
-                      fontWeight={branch.current ? 700 : 600}
+                  {defaultBranchLabel}
+                </text>
+
+                {layout.directCommits.map(({ commit, x }) => {
+                  const target = { kind: "direct", sha: commit.fullSha } as const;
+                  const active =
+                    activeTarget?.kind === "direct" && activeTarget.sha === commit.fullSha;
+                  return (
+                    <g
+                      key={commit.fullSha}
+                      data-git-tree-interactive
+                      role="group"
+                      tabIndex={0}
+                      aria-label={`${commit.sha}, ${commit.message}, by ${commit.author} on ${formatDate(commit.date)}`}
+                      className="cursor-help outline-none focus-visible:[&_[data-visible-node]]:stroke-[var(--ring)]"
+                      onFocus={() => showFocusedTooltip(target)}
+                      onBlur={hideFocusedTooltip}
+                      onMouseEnter={() => showHoveredTooltip(target)}
+                      onMouseLeave={hideHoveredTooltip}
                     >
-                      {branch.name.length > 28 ? `${branch.name.slice(0, 27)}…` : branch.name}
-                    </text>
-                    <text x={tipX + 10} y={laneY + 12} fill="var(--muted-foreground)" fontSize={10}>
-                      {branch.ahead > 0 ? `↑${branch.ahead}` : ""}
-                      {branch.ahead > 0 && branch.behind > 0 ? "  " : ""}
-                      {branch.behind > 0 ? `↓${branch.behind}` : ""}
-                      {branch.current ? "  current" : ""}
-                    </text>
+                      <rect
+                        data-hit-area
+                        x={x - (commitHitWidths.get(`direct:${commit.fullSha}`) ?? 20) / 2}
+                        y={layout.mainY - 10}
+                        width={commitHitWidths.get(`direct:${commit.fullSha}`) ?? 20}
+                        height={20}
+                        fill="transparent"
+                      />
+                      <rect
+                        data-visible-node
+                        x={x - (active ? 4 : 3)}
+                        y={layout.mainY - (active ? 4 : 3)}
+                        width={active ? 8 : 6}
+                        height={active ? 8 : 6}
+                        rx={1.5}
+                        fill={active ? "var(--primary)" : "var(--muted-foreground)"}
+                        stroke="transparent"
+                        strokeWidth={2}
+                        pointerEvents="none"
+                      />
+                    </g>
+                  );
+                })}
+
+                {layout.merges.map(({ commit, x }, index) => {
+                  const showLabel = index % layout.labelEvery === 0;
+                  const label = commit.prNumber ? `#${commit.prNumber}` : commit.sha;
+                  const target = { kind: "merge", sha: commit.fullSha } as const;
+                  const active =
+                    activeTarget?.kind === "merge" && activeTarget.sha === commit.fullSha;
+                  return (
+                    <g
+                      key={commit.fullSha}
+                      data-git-tree-interactive
+                      role="group"
+                      tabIndex={0}
+                      aria-label={`${label}, ${commit.prTitle ?? commit.subject}, on ${formatDate(commit.date)}`}
+                      className="cursor-help outline-none focus-visible:[&_[data-visible-node]]:stroke-[var(--ring)]"
+                      onFocus={() => showFocusedTooltip(target)}
+                      onBlur={hideFocusedTooltip}
+                      onMouseEnter={() => showHoveredTooltip(target)}
+                      onMouseLeave={hideHoveredTooltip}
+                    >
+                      <rect
+                        data-hit-area
+                        x={x - (commitHitWidths.get(`merge:${commit.fullSha}`) ?? 20) / 2}
+                        y={layout.mainY - 10}
+                        width={commitHitWidths.get(`merge:${commit.fullSha}`) ?? 20}
+                        height={20}
+                        fill="transparent"
+                      />
+                      <rect
+                        data-visible-node
+                        x={x - (active ? 5 : 4)}
+                        y={layout.mainY - (active ? 5 : 4)}
+                        width={active ? 10 : 8}
+                        height={active ? 10 : 8}
+                        rx={2}
+                        fill="var(--background)"
+                        stroke="var(--muted-foreground)"
+                        strokeWidth={1.5}
+                        filter="url(#git-tree-node-shadow)"
+                        pointerEvents="none"
+                      />
+                      {showLabel ? (
+                        <>
+                          <text
+                            x={x}
+                            y={layout.mainY + 20}
+                            textAnchor="middle"
+                            fill="var(--foreground)"
+                            fontSize={11}
+                            fontWeight={500}
+                          >
+                            {label}
+                          </text>
+                          <text
+                            x={x}
+                            y={layout.mainY + 34}
+                            textAnchor="middle"
+                            fill="var(--muted-foreground)"
+                            fontSize={10}
+                          >
+                            {compactDate(commit.date)}
+                          </text>
+                        </>
+                      ) : null}
+                    </g>
+                  );
+                })}
+              </g>
+            </g>
+
+            {layout.branches.map(
+              ({ branch, forkX, tipX, laneY, path, commitXs, hiddenCommitCount }, index) => {
+                const active = activeBranchName === branch.name;
+                const dimmed = hasFocus && !active;
+                const color = branchColor(branch);
+                const branchDelay = MAIN_DRAW_MS + index * BRANCH_STAGGER_MS;
+                const target = { kind: "branch", name: branch.name } as const;
+                return (
+                  <g
+                    key={branch.name}
+                    data-git-tree-interactive
+                    role="group"
+                    tabIndex={0}
+                    aria-label={branchDescription(branch)}
+                    className="cursor-help outline-none transition-opacity duration-150 ease-in-out focus-visible:[&_path[data-visible]]:stroke-[var(--ring)] motion-reduce:transition-none"
+                    opacity={dimmed ? 0.16 : active ? 1 : 0.72}
+                    onFocus={() => showFocusedTooltip(target)}
+                    onBlur={hideFocusedTooltip}
+                    onMouseEnter={() => showHoveredTooltip(target)}
+                    onMouseLeave={hideHoveredTooltip}
+                  >
+                    <path d={path} fill="none" stroke="transparent" strokeWidth={18} />
+                    <path
+                      data-visible
+                      d={path}
+                      fill="none"
+                      stroke={color}
+                      strokeWidth={active ? 2.5 : 1.75}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      pathLength={1}
+                      className="git-tree-draw-branch"
+                      style={{ "--git-tree-delay": `${branchDelay}ms` } as CSSProperties}
+                    />
+                    <g
+                      className="git-tree-fade-info"
+                      style={
+                        {
+                          "--git-tree-delay": `${branchDelay + BRANCH_INFO_OFFSET_MS}ms`,
+                        } as CSSProperties
+                      }
+                    >
+                      <rect
+                        x={forkX - 3.5}
+                        y={layout.mainY - 3.5}
+                        width={7}
+                        height={7}
+                        rx={2}
+                        fill="var(--background)"
+                        stroke={color}
+                        strokeWidth={1.5}
+                      />
+                      {commitXs.map((x) => (
+                        <rect
+                          key={`${branch.name}-commit-${x}`}
+                          x={x - 2.5}
+                          y={laneY - 2.5}
+                          width={5}
+                          height={5}
+                          rx={1}
+                          fill={color}
+                        />
+                      ))}
+                      {hiddenCommitCount > 0 ? (
+                        <text
+                          x={tipX - 7}
+                          y={laneY - 8}
+                          textAnchor="end"
+                          fill="var(--muted-foreground)"
+                          fontSize={9}
+                        >
+                          +{hiddenCommitCount}
+                        </text>
+                      ) : null}
+                      <circle cx={tipX} cy={laneY} r={active ? 5 : 4} fill={color} />
+                      <text
+                        x={tipX + 10}
+                        y={laneY - 3}
+                        fill="var(--foreground)"
+                        fontSize={11}
+                        fontWeight={branch.current ? 700 : 600}
+                      >
+                        {branch.name.length > 28 ? `${branch.name.slice(0, 27)}…` : branch.name}
+                      </text>
+                      <text
+                        x={tipX + 10}
+                        y={laneY + 12}
+                        fill="var(--muted-foreground)"
+                        fontSize={10}
+                      >
+                        {branch.ahead > 0 ? `↑${branch.ahead}` : ""}
+                        {branch.ahead > 0 && branch.behind > 0 ? "  " : ""}
+                        {branch.behind > 0 ? `↓${branch.behind}` : ""}
+                        {branch.current ? "  current" : ""}
+                      </text>
+                    </g>
                   </g>
-                </g>
-              );
-            },
-          )}
-        </svg>
+                );
+              },
+            )}
+          </svg>
+
+          {tooltipContent ? (
+            <GitTreeTooltip
+              content={tooltipContent}
+              layoutWidth={layout.width}
+              instant={tooltipInstant}
+            />
+          ) : null}
+        </div>
       </div>
 
-      <div className="pointer-events-none absolute inset-x-3 bottom-3 flex items-end justify-between gap-3">
-        <div className="pointer-events-auto min-w-0 max-w-sm rounded-lg border border-border/70 bg-popover/95 px-3 py-2 text-xs shadow-sm backdrop-blur-sm">
-          {selectedCommit ? (
-            <>
-              <div className="truncate font-medium text-foreground">{selectedCommit.message}</div>
-              <div className="mt-0.5 text-muted-foreground">
-                {selectedCommit.sha} · {selectedCommit.author}
-              </div>
-              <div className="mt-0.5 text-muted-foreground">{formatDate(selectedCommit.date)}</div>
-            </>
-          ) : selectedBranch ? (
-            <>
-              <div className="truncate font-medium text-foreground">{selectedBranch.name}</div>
-              <div className="mt-0.5 text-muted-foreground">
-                {selectedBranch.ahead} ahead · {selectedBranch.behind} behind ·{" "}
-                {selectedBranch.lastCommitAuthor}
-              </div>
-              <div className="mt-0.5 text-muted-foreground">
-                {formatDate(selectedBranch.lastCommitDate)} · {selectedBranch.headSha.slice(0, 8)}
-              </div>
-            </>
-          ) : (
-            <span className="text-muted-foreground">
-              Drag to pan · Ctrl/⌘ + scroll to zoom · Select a branch for details
-            </span>
-          )}
-        </div>
-
+      <div className="pointer-events-none absolute right-3 bottom-3">
         <div className="pointer-events-auto flex shrink-0 items-center gap-1 rounded-lg border border-border/70 bg-popover/95 p-1 shadow-sm backdrop-blur-sm">
           <Button
             variant="ghost"

@@ -1523,7 +1523,6 @@ function ChatViewContent(props: ChatViewProps) {
     [rightPanelState.surfaces],
   );
   const previewPanelOpen = activeRightPanelKind === "preview" && isPreviewSupportedInRuntime();
-  const gitTreeOpen = activeRightPanelKind === "git-tree";
   const rightPanelOpen = rightPanelState.isOpen;
   const canMaximizeRightPanel = rightPanelOpen && !shouldUsePlanSidebarSheet;
   const rightPanelMaximized =
@@ -3062,10 +3061,6 @@ function ChatViewContent(props: ChatViewProps) {
   const addGitTreeSurface = useCallback(() => {
     if (!activeThreadRef || !gitCwd) return;
     useRightPanelStore.getState().open(activeThreadRef, "git-tree");
-  }, [activeThreadRef, gitCwd]);
-  const toggleGitTree = useCallback(() => {
-    if (!activeThreadRef || !gitCwd) return;
-    useRightPanelStore.getState().toggle(activeThreadRef, "git-tree");
   }, [activeThreadRef, gitCwd]);
   const openFileSurface = useCallback(
     (relativePath: string) => {
@@ -5725,10 +5720,8 @@ function ChatViewContent(props: ChatViewProps) {
             keybindings={keybindings}
             availableEditors={availableEditors}
             rightPanelOpen={rightPanelOpen}
-            gitTreeOpen={gitTreeOpen}
             gitCwd={gitCwd}
             onNewThreadInProject={handleNewThreadInActiveProject}
-            onToggleGitTree={toggleGitTree}
             onRunProjectScript={runProjectScript}
             onAddProjectScript={saveProjectScript}
             onUpdateProjectScript={updateProjectScript}

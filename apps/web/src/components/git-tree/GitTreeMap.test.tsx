@@ -52,13 +52,17 @@ const snapshot: Extract<GitTreeSnapshotResult, { _tag: "repository" }> = {
 };
 
 describe("GitTreeMap accessibility", () => {
-  it("keeps keyboard branch controls exposed below the SVG group", () => {
+  it("keeps keyboard tooltip triggers exposed below the SVG group", () => {
     const markup = renderToStaticMarkup(<GitTreeMap snapshot={snapshot} />);
 
     expect(markup).toMatch(/<svg[^>]*role="group"/);
     expect(markup).not.toContain('role="img"');
-    expect(markup).toMatch(/<g[^>]*role="button"[^>]*tabindex="0"/);
+    expect(markup).toMatch(/<g[^>]*role="group"[^>]*tabindex="0"/);
     expect(markup).toContain('aria-label="feature/accessibility, 1 ahead');
     expect(markup).toContain('aria-label="1111111, Initial commit, by Ada');
+    expect(markup).toContain('data-hit-area="true"');
+    expect(markup).toContain('width="20" height="20" fill="transparent"');
+    expect(markup).not.toContain("Select a branch for details");
+    expect(markup).toContain("overflow-y-hidden");
   });
 });

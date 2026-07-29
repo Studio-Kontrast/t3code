@@ -4,6 +4,7 @@ import { loadRepoEnv } from "../../scripts/lib/public-config.ts";
 
 const repoEnv = loadRepoEnv();
 const shouldLaunchElectronAfterPack = process.env.T3CODE_DESKTOP_DEV === "1";
+const vitePlusPackCommand = "node ../../node_modules/vite-plus/bin/vp pack";
 const publicConfigDefine = {
   __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__: JSON.stringify(
     repoEnv.T3CODE_CLERK_PUBLISHABLE_KEY?.trim() ?? "",
@@ -14,18 +15,17 @@ export default defineConfig({
   run: {
     tasks: {
       build: {
-        command: "node scripts/build-preview-annotation-css.mjs && vp pack",
+        command: `node scripts/build-preview-annotation-css.mjs && ${vitePlusPackCommand}`,
         dependsOn: ["t3#build"],
         cache: false,
       },
       dev: {
-        command:
-          "node scripts/build-preview-annotation-css.mjs && cross-env T3CODE_DESKTOP_DEV=1 vp pack --watch",
+        command: `node scripts/build-preview-annotation-css.mjs && cross-env T3CODE_DESKTOP_DEV=1 ${vitePlusPackCommand} --watch`,
         dependsOn: ["t3#build"],
         cache: false,
       },
       "dev:bundle": {
-        command: "node scripts/build-preview-annotation-css.mjs && vp pack --watch",
+        command: `node scripts/build-preview-annotation-css.mjs && ${vitePlusPackCommand} --watch`,
         cache: false,
       },
       "dev:electron": {
