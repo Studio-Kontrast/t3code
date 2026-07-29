@@ -12,7 +12,7 @@ const LANE_HEIGHT = 58;
 const MAX_LANES = 5;
 const CORNER_RADIUS = 18;
 const DAY_MS = 86_400_000;
-const MIN_COMMIT_SPACING = 14;
+const MIN_COMMIT_SPACING = 18;
 const MAX_BRANCH_COMMIT_TICKS = 12;
 
 export const GIT_TREE_ZOOM_MIN = 0.4;

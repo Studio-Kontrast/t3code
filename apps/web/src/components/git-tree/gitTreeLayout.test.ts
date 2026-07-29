@@ -132,6 +132,10 @@ describe("gitTreeLayout", () => {
       );
 
     expect(new Set(positions).size).toBe(positions.length);
+    const sortedPositions = positions.toSorted((left, right) => left - right);
+    expect(
+      sortedPositions.slice(1).every((position, index) => position - sortedPositions[index]! >= 18),
+    ).toBe(true);
     expect(Math.min(...positions)).toBe(layout.mainStartX);
     expect(Math.max(...positions)).toBe(layout.mainEndX);
     expect(positions.every((x) => x >= 0 && x < layout.width)).toBe(true);

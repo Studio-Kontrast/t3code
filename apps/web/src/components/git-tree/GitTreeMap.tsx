@@ -43,9 +43,9 @@ interface DragState {
   readonly scrollLeft: number;
 }
 
-const MAIN_DRAW_MS = 1_400;
-const BRANCH_STAGGER_MS = 70;
-const BRANCH_INFO_OFFSET_MS = 600;
+const MAIN_DRAW_MS = 1_200;
+const BRANCH_STAGGER_MS = 60;
+const BRANCH_INFO_OFFSET_MS = 750;
 
 function formatDate(value: string): string {
   const date = new Date(value);
