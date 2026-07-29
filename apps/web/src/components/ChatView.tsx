@@ -390,6 +390,7 @@ const PreviewPanel = lazy(() =>
 );
 const DiffPanel = lazy(() => import("./DiffPanel"));
 const FilePreviewPanel = lazy(() => import("./files/FilePreviewPanel"));
+const GitTreePanel = lazy(() => import("./git-tree/GitTreePanel"));
 const EMPTY_PENDING_FILE_SURFACE_IDS: ReadonlySet<string> = new Set();
 const TYPE_TO_FOCUS_EDITABLE_SELECTOR = [
   "input",
@@ -1522,6 +1523,7 @@ function ChatViewContent(props: ChatViewProps) {
     [rightPanelState.surfaces],
   );
   const previewPanelOpen = activeRightPanelKind === "preview" && isPreviewSupportedInRuntime();
+  const gitTreeOpen = activeRightPanelKind === "git-tree";
   const rightPanelOpen = rightPanelState.isOpen;
   const canMaximizeRightPanel = rightPanelOpen && !shouldUsePlanSidebarSheet;
   const rightPanelMaximized =
@@ -3057,6 +3059,14 @@ function ChatViewContent(props: ChatViewProps) {
     if (!activeThreadRef || !activeProject) return;
     useRightPanelStore.getState().open(activeThreadRef, "files");
   }, [activeProject, activeThreadRef]);
+  const addGitTreeSurface = useCallback(() => {
+    if (!activeThreadRef || !gitCwd) return;
+    useRightPanelStore.getState().open(activeThreadRef, "git-tree");
+  }, [activeThreadRef, gitCwd]);
+  const toggleGitTree = useCallback(() => {
+    if (!activeThreadRef || !gitCwd) return;
+    useRightPanelStore.getState().toggle(activeThreadRef, "git-tree");
+  }, [activeThreadRef, gitCwd]);
   const openFileSurface = useCallback(
     (relativePath: string) => {
       if (!activeThreadRef || !activeProject) return;
@@ -5581,7 +5591,25 @@ function ChatViewContent(props: ChatViewProps) {
     </div>
   );
   const rightPanelContent = activeThreadRef ? (
-    activeRightPanelSurface?.kind === "preview" ? (
+    activeRightPanelSurface?.kind === "git-tree" && gitCwd ? (
+      <Suspense
+        fallback={
+          <div
+            className="flex min-h-0 flex-1 items-center justify-center text-xs text-muted-foreground"
+            role="status"
+          >
+            Loading Git tree…
+          </div>
+        }
+      >
+        <GitTreePanel
+          key={`${activeThreadRef.environmentId}:${gitCwd}`}
+          environmentId={activeThreadRef.environmentId}
+          cwd={gitCwd}
+          vcsRefreshToken={gitStatusQuery.data}
+        />
+      </Suspense>
+    ) : activeRightPanelSurface?.kind === "preview" ? (
       <Suspense fallback={null}>
         <PreviewPanel
           mode="embedded"
@@ -5697,8 +5725,10 @@ function ChatViewContent(props: ChatViewProps) {
             keybindings={keybindings}
             availableEditors={availableEditors}
             rightPanelOpen={rightPanelOpen}
+            gitTreeOpen={gitTreeOpen}
             gitCwd={gitCwd}
             onNewThreadInProject={handleNewThreadInActiveProject}
+            onToggleGitTree={toggleGitTree}
             onRunProjectScript={runProjectScript}
             onAddProjectScript={saveProjectScript}
             onUpdateProjectScript={updateProjectScript}
@@ -6061,9 +6091,11 @@ function ChatViewContent(props: ChatViewProps) {
           onAddTerminal={addTerminalSurface}
           onAddDiff={addDiffSurface}
           onAddFiles={addFilesSurface}
+          onAddGitTree={addGitTreeSurface}
           browserAvailable={isPreviewSupportedInRuntime()}
           diffAvailable={isServerThread && isGitRepo}
           filesAvailable={activeProject !== null}
+          gitTreeAvailable={gitCwd !== null}
         >
           {rightPanelContent}
         </RightPanelTabs>
@@ -6088,9 +6120,11 @@ function ChatViewContent(props: ChatViewProps) {
             onAddTerminal={addTerminalSurface}
             onAddDiff={addDiffSurface}
             onAddFiles={addFilesSurface}
+            onAddGitTree={addGitTreeSurface}
             browserAvailable={isPreviewSupportedInRuntime()}
             diffAvailable={isServerThread && isGitRepo}
             filesAvailable={activeProject !== null}
+            gitTreeAvailable={gitCwd !== null}
           >
             {rightPanelContent}
           </RightPanelTabs>

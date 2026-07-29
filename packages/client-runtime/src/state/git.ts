@@ -9,6 +9,11 @@ export function createGitEnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
 ) {
   return {
+    treeSnapshot: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:git:tree-snapshot",
+      tag: WS_METHODS.gitTreeSnapshot,
+      staleTimeMs: 10_000,
+    }),
     pullRequestResolution: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:git:resolve-pull-request",
       tag: WS_METHODS.gitResolvePullRequest,

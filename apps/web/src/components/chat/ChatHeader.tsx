@@ -6,6 +6,7 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { GitFork } from "lucide-react";
 import { memo } from "react";
 import GitActionsControl from "../GitActionsControl";
 import { type DraftId } from "~/composerDraftStore";
@@ -19,6 +20,7 @@ import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useT3ProjectFileScripts } from "~/hooks/useT3ProjectFileScripts";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { cn } from "~/lib/utils";
+import { Button } from "../ui/button";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -33,8 +35,10 @@ interface ChatHeaderProps {
   keybindings: ResolvedKeybindingsConfig;
   availableEditors: ReadonlyArray<EditorId>;
   rightPanelOpen: boolean;
+  gitTreeOpen: boolean;
   gitCwd: string | null;
   onNewThreadInProject: () => void;
+  onToggleGitTree: () => void;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<ProjectScriptActionResult>;
   onUpdateProjectScript: (
@@ -56,6 +60,13 @@ export function shouldShowOpenInPicker(input: {
   );
 }
 
+export function shouldShowGitTreeButton(input: {
+  readonly activeProjectName: string | undefined;
+  readonly gitCwd: string | null;
+}): boolean {
+  return Boolean(input.activeProjectName && input.gitCwd);
+}
+
 export const ChatHeader = memo(function ChatHeader({
   activeThreadEnvironmentId,
   activeThreadId,
@@ -69,8 +80,10 @@ export const ChatHeader = memo(function ChatHeader({
   keybindings,
   availableEditors,
   rightPanelOpen,
+  gitTreeOpen,
   gitCwd,
   onNewThreadInProject,
+  onToggleGitTree,
   onRunProjectScript,
   onAddProjectScript,
   onUpdateProjectScript,
@@ -86,6 +99,7 @@ export const ChatHeader = memo(function ChatHeader({
     activeThreadEnvironmentId,
     primaryEnvironmentId,
   });
+  const showGitTreeButton = shouldShowGitTreeButton({ activeProjectName, gitCwd });
   return (
     <div className="@container/header-actions flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden sm:gap-3">
@@ -159,6 +173,24 @@ export const ChatHeader = memo(function ChatHeader({
             availableEditors={availableEditors}
             openInCwd={openInCwd}
           />
+        )}
+        {showGitTreeButton && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant={gitTreeOpen ? "secondary" : "outline"}
+                  size="icon-xs"
+                  aria-label="Toggle Git tree"
+                  aria-pressed={gitTreeOpen}
+                  onClick={onToggleGitTree}
+                />
+              }
+            >
+              <GitFork aria-hidden />
+            </TooltipTrigger>
+            <TooltipPopup side="bottom">Git tree</TooltipPopup>
+          </Tooltip>
         )}
         {activeProjectName && (
           <GitActionsControl

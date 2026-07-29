@@ -816,6 +816,66 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   animation-duration: 0s !important;
 }
 
+/* Git tree entrance motion, adapted from Canopy's branch timeline. */
+@keyframes git-tree-draw-path {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes git-tree-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.git-tree-draw-main,
+.git-tree-draw-branch {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation-play-state: paused;
+}
+
+.git-tree-draw-main {
+  animation: git-tree-draw-path 2.6s cubic-bezier(0.19, 1, 0.22, 1) forwards paused;
+}
+
+.git-tree-draw-branch {
+  animation: git-tree-draw-path 0.9s cubic-bezier(0.45, 0.05, 0.55, 0.95) forwards paused;
+  animation-delay: var(--git-tree-delay, 0ms);
+}
+
+.git-tree-fade-info {
+  opacity: 0;
+  animation: git-tree-fade-in 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards paused;
+  animation-delay: var(--git-tree-delay, 0ms);
+}
+
+.git-tree-timeline-ready .git-tree-draw-main,
+.git-tree-timeline-ready .git-tree-draw-branch,
+.git-tree-timeline-ready .git-tree-fade-info {
+  animation-play-state: running;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .git-tree-draw-main,
+  .git-tree-draw-branch {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+
+  .git-tree-fade-info {
+    animation: none;
+    opacity: 1;
+  }
+}
+
 :root {
   color-scheme: light;
   --radius: 0.625rem;

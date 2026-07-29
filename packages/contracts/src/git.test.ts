@@ -7,6 +7,7 @@ import {
   GitRunStackedActionResult,
   GitRunStackedActionInput,
   GitResolvePullRequestResult,
+  GitTreeSnapshotResult,
 } from "./git.ts";
 
 const decodeCreateWorktreeInput = Schema.decodeUnknownSync(VcsCreateWorktreeInput);
@@ -16,6 +17,7 @@ const decodePreparePullRequestThreadInput = Schema.decodeUnknownSync(
 const decodeRunStackedActionInput = Schema.decodeUnknownSync(GitRunStackedActionInput);
 const decodeRunStackedActionResult = Schema.decodeUnknownSync(GitRunStackedActionResult);
 const decodeResolvePullRequestResult = Schema.decodeUnknownSync(GitResolvePullRequestResult);
+const decodeGitTreeSnapshotResult = Schema.decodeUnknownSync(GitTreeSnapshotResult);
 
 describe("VcsCreateWorktreeInput", () => {
   it("accepts omitted newRefName for existing-refName worktrees", () => {
@@ -124,5 +126,54 @@ describe("GitRunStackedActionResult", () => {
     if (parsed.toast.cta.kind === "run_action") {
       expect(parsed.toast.cta.action.kind).toBe("create_pr");
     }
+  });
+});
+
+describe("GitTreeSnapshotResult", () => {
+  it("decodes repository snapshots used by the Git tree visualizer", () => {
+    const parsed = decodeGitTreeSnapshotResult({
+      _tag: "repository",
+      requestedCwd: "/repo/packages/app",
+      root: "/repo",
+      name: "repo",
+      currentBranch: "feature/tree",
+      defaultBranch: "main",
+      isEmpty: false,
+      branches: [
+        {
+          name: "feature/tree",
+          current: true,
+          ahead: 2,
+          behind: 1,
+          headSha: "abcdef0123456789",
+          lastCommitDate: "2026-07-13T12:00:00+02:00",
+          lastCommitAuthor: "Ada",
+          divergedFromSha: "1234567890abcdef",
+          divergedFromDate: "2026-07-12T12:00:00+02:00",
+          status: "fresh",
+        },
+      ],
+      merges: [],
+      directCommits: [],
+      truncated: { branches: false, merges: false, directCommits: false },
+    });
+
+    expect(parsed._tag).toBe("repository");
+    if (parsed._tag === "repository") {
+      expect(parsed.root).toBe("/repo");
+      expect(parsed.branches[0]?.ahead).toBe(2);
+    }
+  });
+
+  it("decodes the non-Git result without requiring repository metadata", () => {
+    expect(
+      decodeGitTreeSnapshotResult({
+        _tag: "notGitRepository",
+        requestedCwd: "/tmp/not-a-repo",
+      }),
+    ).toEqual({
+      _tag: "notGitRepository",
+      requestedCwd: "/tmp/not-a-repo",
+    });
   });
 });
